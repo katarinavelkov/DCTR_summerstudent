@@ -65,6 +65,8 @@ to get everything configured.
 
 ## The input data 
 
+I've prepared for you two samples of simulated top-antitop events. Each of the top (or antitop) disintegrates into a b quark (that produces what we call a jet), one lepton, and neutrinos, which we normally wouldn't detect. See [here](https://cms-opendata-workshop.github.io/workshop2024-lesson-physics-objects/01-introduction.html#overview) for a bit more of detail on what all these are. It's important to note that the variables that we have in our samples correspond to "generator" particles, without emulation of the detector (that's how we have information on the neutrinos).
+
 I have copied the data that you need as input in this path 
 
 ```
@@ -130,6 +132,8 @@ You can explore the resulting rootfile and make plots using something like the s
 ## Things to check during your first week
 
 A bit of ''homework'' for your first week. This is mostly to get you started. Don't feel pressed to finish everything in a week, it may take time to master all this :)   
+
+0) Check a bit what the different things are that we measure in CMS ([this](https://cms-opendata-workshop.github.io/workshop2024-lesson-physics-objects/01-introduction.html#overview)). There's no need for you to understand all the details, but I think it's useful if you understand at some level where all this data comes or could come from. Just to note: we are working with simulations and the variables that we have are, for the moment, associated with ``generator'' particles. These are the particles that come directly out of our predictions, without having emulated any detector effect on them.
 
 1) Familiarize yourself with the neural network architecture (see the paper here https://arxiv.org/abs/1902.08570). This introduced in `particle_net.py`, which imports the neural network from (https://github.com/hqucms/weaver-core/blob/main/weaver/nn/model/ParticleNet.py)[here]
 
