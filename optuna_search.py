@@ -12,7 +12,6 @@ from weaver.nn.model.ParticleNet import ParticleNet
 import subprocess
 from sklearn.metrics import roc_curve, auc
 
-
 TRAIN_PATH = r'/eos/cms/store/group/cmst3/user/sesanche/SummerStudent/train_0p01/*.root'
 TEST_PATH = r'/eos/cms/store/group/cmst3/user/sesanche/SummerStudent/test_0p01/*.root'
 
@@ -22,9 +21,9 @@ os.makedirs('optuna_outputs_2', exist_ok=True)
 
 
 def EdgeConv_params(trial):
-    num_ec_blocks = trial.suggest_int('num_ec_blocks', 1, 2)
+    num_ec_blocks = trial.suggest_int('num_ec_blocks', 1, 3)
     ec_k = trial.suggest_int('ec_k', 6, 18, step=6)
-    num_neurons = [16, 32]
+    num_neurons = [32, 64, 128]
 
     ec_params = []
     for block in range(num_ec_blocks):
@@ -35,7 +34,7 @@ def EdgeConv_params(trial):
 
 def FullyConnected_params(trial):
     num_fc_layers = trial.suggest_int('num_fc_layers', 1, 2)
-    num_neurons = [32, 64]
+    num_neurons = [64, 128]
     fc_drop = trial.suggest_float('fc_p', 0.1, 0.5, step=0.1)
     fc_neurons = trial.suggest_categorical('fc_c', num_neurons)
 
@@ -99,7 +98,7 @@ def run_training(model_iter):
         '--gpus', '0',
         '--batch-size', '256',
         '--start-lr', '5e-3',
-        '--num-epochs', '1',
+        '--num-epochs', '25',
         '--optimizer', 'ranger',
         '--log', f'optuna_logs_2/optuna_model_{model_iter}.log',
     ]
@@ -110,7 +109,7 @@ def run_training(model_iter):
         print(f'Training for {model_iter} failed!')
         print('stderr output:')
         print(result.stderr)
-        #raise RuntimeError(f'Training {model_iter} failed')
+        raise RuntimeError(f'Training {model_iter} failed')
 
     print(result.stdout)
 
@@ -124,7 +123,7 @@ def run_prediction(model_iter):
         '--data-test', TEST_PATH,
         '--data-config', 'config.yaml',
         '--network-config', f'particle_net_temp_2_{model_iter}.py',
-        '--model-prefix', f'optuna_models_2/optuna_model_{model_iter}_best_epoch_state',
+        '--model-prefix', f'optuna_models_2/optuna_model_{model_iter}',
         '--gpus', '0',
         '--batch-size', '256',
         '--log', f'optuna_logs_2/optuna_model_{model_iter}_pred.log',
@@ -138,7 +137,7 @@ def run_prediction(model_iter):
         print('stderr output:')
         print(result.stderr)
         print('result return code:', result.returncode)
-        #raise RuntimeError(f'Prediction {model_iter} failed')
+        raise RuntimeError(f'Prediction {model_iter} failed')
 
     print(result.stdout)
 
