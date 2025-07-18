@@ -1,0 +1,11 @@
+*.pt
+*.log
+optuna_models
+optuna_logs
+optuna_outputs
+logs
+predict_output
+particle_net_temp_*.py
+particle_net_temp_*.pyc
+particle_net_temp_files
+particle_net.cpython*
