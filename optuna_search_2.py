@@ -5,7 +5,7 @@ import numpy as np
 import awkward as ak
 from weaver.utils.nn.metrics import evaluate_metrics
 import datetime
-from sklearn.metrics import f1_score
+from sklearn.metrics import f1_score, log_loss
 import torch
 import torch.nn as nn
 from weaver.nn.model.ParticleNet import ParticleNet
@@ -15,14 +15,17 @@ from sklearn.metrics import roc_curve, auc
 TRAIN_PATH = r'/eos/cms/store/group/cmst3/user/sesanche/SummerStudent/train_0p01/*.root'
 TEST_PATH = r'/eos/cms/store/group/cmst3/user/sesanche/SummerStudent/test_0p01/*.root'
 
-os.makedirs('optuna_models_2', exist_ok=True)
-os.makedirs('optuna_logs_2', exist_ok=True)
-os.makedirs('optuna_outputs_2', exist_ok=True)
+optuna_version = input("Enter number of the Optuna version: ")
+
+os.makedirs(f'optuna_models_{optuna_version}', exist_ok=True)
+os.makedirs(f'optuna_logs_{optuna_version}', exist_ok=True)
+os.makedirs(f'optuna_outputs_{optuna_version}', exist_ok=True)
+os.makedirs('temporary_net_files', exist_ok=True)
 
 
 def EdgeConv_params(trial):
     num_ec_blocks = trial.suggest_int('num_ec_blocks', 1, 3)
-    ec_k = trial.suggest_int('ec_k', 6, 18, step=6)
+    ec_k = trial.suggest_int('ec_k', 4, 20, step=4)
     num_neurons = [32, 64, 128]
 
     ec_params = []
@@ -34,7 +37,7 @@ def EdgeConv_params(trial):
 
 def FullyConnected_params(trial):
     num_fc_layers = trial.suggest_int('num_fc_layers', 1, 2)
-    num_neurons = [64, 128]
+    num_neurons = [32, 64, 128]
     fc_drop = trial.suggest_float('fc_p', 0.1, 0.5, step=0.1)
     fc_neurons = trial.suggest_categorical('fc_c', num_neurons)
 
@@ -82,7 +85,7 @@ def get_model(data_config, **kwargs):
         conv_params=repr(ec_params),
         fc_params=repr(fc_params))'''
 
-    with open(f'particle_net_temp_2_{model_iter}.py', 'w') as f:
+    with open(f'temporary_net_files/particle_net_temp_{optuna_version}_{model_iter}.py', 'w') as f:
         f.write(code_to_write)
 
 
@@ -93,14 +96,14 @@ def run_training(model_iter):
         '--data-train', TRAIN_PATH,
         '--data-test', TEST_PATH,
         '--data-config', 'config.yaml',
-        '--network-config', f'particle_net_temp_2_{model_iter}.py', # change this - move to a folder
-        '--model-prefix', f'optuna_models_2/optuna_model_{model_iter}',
+        '--network-config', f'particle_net_temp_{optuna_version}_{model_iter}.py', # change this - move to a folder
+        '--model-prefix', f'optuna_models_{optuna_version}/optuna_model_{model_iter}',
         '--gpus', '0',
         '--batch-size', '256',
         '--start-lr', '5e-3',
         '--num-epochs', '25',
         '--optimizer', 'ranger',
-        '--log', f'optuna_logs_2/optuna_model_{model_iter}.log',
+        '--log', f'optuna_logs_{optuna_version}/optuna_model_{model_iter}.log',
     ]
 
     result = subprocess.run(prompt, capture_output=True, text=True)
@@ -122,12 +125,12 @@ def run_prediction(model_iter):
         '--data-train', TRAIN_PATH,
         '--data-test', TEST_PATH,
         '--data-config', 'config.yaml',
-        '--network-config', f'particle_net_temp_2_{model_iter}.py',
-        '--model-prefix', f'optuna_models_2/optuna_model_{model_iter}',
+        '--network-config', f'particle_net_temp_{optuna_version}_{model_iter}.py',
+        '--model-prefix', f'optuna_models_{optuna_version}/optuna_model_{model_iter}',
         '--gpus', '0',
         '--batch-size', '256',
-        '--log', f'optuna_logs_2/optuna_model_{model_iter}_pred.log',
-        '--predict-output', f'optuna_outputs_2/optuna_model_{model_iter}_predictions.root',
+        '--log', f'optuna_logs_{optuna_version}/optuna_model_{model_iter}_pred.log',
+        '--predict-output', f'optuna_outputs_{optuna_version}/optuna_model_{model_iter}_predictions.root',
     ]
 
     result = subprocess.run(prompt, capture_output=True, text=True)
@@ -144,7 +147,7 @@ def run_prediction(model_iter):
 
 def calculate_test_scores(model_iter):
     # Calculate test metrics from the predictions stored in root files
-    root_prediction_path = f'optuna_outputs_2/optuna_model_{model_iter}_predictions.root'
+    root_prediction_path = f'optuna_outputs_{optuna_version}/optuna_model_{model_iter}_predictions.root'
 
     with uproot.open(root_prediction_path) as file:
         events = file["Events"]
@@ -168,13 +171,64 @@ def calculate_test_scores(model_iter):
 
         f1_score_weaver = metrics_classes['f1_score']
 
+        ce_loss = log_loss(target, pred_probs)
+
         print(f"Trial {model_iter}, threshold = {best_threshold}, F1 Score: {f1_score_weaver}, ROC AUC: {roc_auc}")
 
         # fallback to 0.0 if f1_score is None
         if f1_score_weaver is None:
             f1_score_weaver = 0.0
 
-        return f1_score_weaver, roc_auc, best_threshold
+        return f1_score_weaver, roc_auc, best_threshold, ce_loss
+
+def calculate_F1_best_threshold(model_iter):
+    root_prediction_path = f'optuna_outputs_{optuna_version}/optuna_model_{model_iter}_predictions.root'
+
+    with uproot.open(root_prediction_path) as file:
+        events = file["Events"]
+        array = events.arrays(library='ak')
+
+        target = ak.to_numpy(array['_label_']).astype(int)
+
+        # get probabilities 
+        pred_probs = ak.to_numpy(array['score_label_sample1'])
+
+        # roc curve
+        fpr, tpr, thresholds = roc_curve(target, pred_probs)
+        roc_auc = auc(fpr, tpr)
+
+        P = np.sum(target == 1)
+        N = np.sum(target == 0)
+
+        TP = tpr * P
+        FP = fpr * N
+
+        precision = np.divide(TP, (TP + FP), out=np.zeros_like(TP), where=(TP + FP) != 0)
+        recall = tpr  # Recall is the same as TPR
+
+        F1_scores = np.divide(2 * precision[:1] * recall[:1],
+                       precision[:1] + recall[:1], out=np.zeros_like(precision[:1]),
+                        where=(precision[:1] + recall[:1]) != 0)
+
+        best_idx = np.argmax(F1_scores)
+        best_threshold = thresholds[best_idx + 1] # bcz we sliced the array
+        best_f1_score = F1_scores[best_idx]
+
+        return best_f1_score, roc_auc, best_threshold
+
+
+def calculate_cross_entropy(model_iter):
+    root_prediction_path = f'optuna_outputs_{optuna_version}/optuna_model_{model_iter}_predictions.root'
+
+    with uproot.open(root_prediction_path) as file:
+        events = file["Events"]
+        array = events.arrays(library='ak')
+
+        target = ak.to_numpy(array['_label_']).astype(int)
+
+        pred_probs = ak.to_numpy(array['score_label_sample1'])
+
+        return ce_loss
 
 
 def objective(trial):
@@ -191,24 +245,26 @@ def objective(trial):
     try:
         run_training(model_iter)
         run_prediction(model_iter)
-        f1_score, roc_auc, threshold = calculate_test_scores(model_iter)
+        f1_score, roc_auc, threshold, ce_loss = calculate_test_scores(model_iter)
 
     except Exception as e:
         print(f"Error during training or prediction for trial {model_iter}: {e}")
         f1_score = 0.0
         threshold = 0.0
         roc_auc = 0.0
-    
+        ce_loss = 0.0
+
     # Append the best trial into csv file
-    path_csv_results = 'optuna_logs_2/optuna_best_trial_results.csv'
+    path_csv_results = f'optuna_logs_{optuna_version}/optuna_best_trial_results.csv'
     file_exists = os.path.isfile(path_csv_results)
 
-    columns = ['trial_number', 'f1_score', 'roc_auc', 'ec_params', 'fc_params', 'threshold', 'timestamp']
+    columns = ['trial_number', 'f1_score', 'roc_auc', 'ce_loss', 'ec_params', 'fc_params', 'threshold', 'timestamp']
 
     row = {
         'trial_number': model_iter,
         'f1_score': f1_score,
         'roc_auc': roc_auc,
+        'ce_loss': ce_loss,
         'ec_params': str(ec_params),
         'fc_params': str(fc_params),
         'threshold': threshold,
@@ -221,12 +277,12 @@ def objective(trial):
         f.write(','.join(str(row[col]) for col in columns) + '\n')
         f.flush()
 
-    return f1_score, roc_auc
+    return roc_auc, ce_loss
 
 
 def main():
     study = optuna.create_study(
-        directions=['maximize', 'maximize'], 
+        directions=['maximize', 'minimize'], 
         study_name='ParticleNet_Optuna_Search')
     
     study.optimize(objective, n_trials=10, n_jobs=1)
@@ -234,14 +290,14 @@ def main():
     best_trial = study.best_trial
 
     # save the best trial to csv
-    with open("optuna_logs_2/optuna_best_trial_summary.csv", "w") as f:
+    with open(f"optuna_logs_{optuna_version}/optuna_best_trial_summary.csv", "w") as f:
         f.write(f"Best trial number: {best_trial.number}\n")
         f.write(f"Best trial value (F1 score): {best_trial.value}\n")
         f.write(f"Best trial params: {best_trial.params}\n")
 
     # save all trials to csv
     df = study.trials_dataframe(attrs=("number", "value", "params", "state"))
-    df.to_csv("optuna_logs_2/optuna_trials_summary.csv", index=False)
+    df.to_csv(f"optuna_logs_{optuna_version}/optuna_trials_summary.csv", index=False)
 
 if __name__ == "__main__":
     main()
