@@ -30,7 +30,7 @@ def EdgeConv_params(trial):
     num_ec_blocks = trial.suggest_int('num_ec_blocks', 2, 3)
     ec_k = trial.suggest_int('ec_k', 4, 20, step=2)
 
-    num_base_neurons = [16, 32, 64]
+    num_base_neurons = [32, 64, 128]
     base_channels = trial.suggest_categorical('ec_base_channels', num_base_neurons)
 
     ec_params = []
@@ -108,7 +108,7 @@ def run_training(model_iter, num_epochs, batch_size, lr_scheduler_name, optimize
         'weaver',
         '--data-train', TRAIN_PATH,
         # '--data-test', TEST_PATH,
-        '--data-config', 'config.yaml',
+        '--data-config', 'config_reweight.yaml',
         '--network-config', f'temporary_net_files/particle_net_temp_{optuna_version}_{model_iter}.py', 
         '--model-prefix', f'optuna_models_{optuna_version}/optuna_model_{model_iter}',
         '--gpus', '0',
@@ -144,7 +144,7 @@ def run_prediction(model_iter, batch_size):
         '--predict',
         #'--data-train', TRAIN_PATH,
         '--data-test', TEST_PATH,
-        '--data-config', 'config.yaml',
+        '--data-config', 'config_reweight.yaml',
         '--network-config', f'temporary_net_files/particle_net_temp_{optuna_version}_{model_iter}.py',
         '--model-prefix', f'optuna_models_{optuna_version}/optuna_model_{model_iter}',
         '--gpus', '0',
@@ -281,6 +281,61 @@ def parse_validation_metrics(log_path, model_iter):
 
     return df
 
+def parse_train_and_validation_metrics(log_path, model_iter):
+    history = {'train_loss': [], 'val_loss': []}
+    train_loss_match = re.compile(r"Train AvgLoss:\s*([\d\.]+)")
+    #val_loss_match = re.compile(r"Current validation metric:\s*([\d\.]+)")
+    val_loss_match = re.compile(
+            r"ADDED:\s*Average evaluation \(validation\) cross entropy loss:\s*([\d\.]+)"
+            )
+            
+    with open(log_path, 'r') as f:
+        for line in f:
+            train_match_result = train_loss_match.search(line)
+            val_match_result = val_loss_match.search(line)
+            if train_match_result:
+                train_loss = float(train_match_result.group(1))
+                history['train_loss'].append(train_loss)
+            if val_match_result:
+                val_loss = float(val_match_result.group(1))
+                history['val_loss'].append(val_loss)
+
+    print('Train AvgLoss History:', history['train_loss'])
+    print('Validation AvgLoss History:', history['val_loss'])
+
+    df = pd.DataFrame({
+        'train_avg_loss': history['train_loss'],
+        'val_avg_loss': history['val_loss']
+    })
+
+    # save df
+    df.to_csv(f'optuna_plots_{optuna_version}/train_validation_history_{model_iter}.csv', index=False)
+
+    return df
+
+
+def plot_tr_val_history(history, model_iter):
+    train_val_ce_loss_plot_path = f'optuna_plots_{optuna_version}/trial_{model_iter}_train_validation_history.png'
+    
+    df = pd.DataFrame(history, columns=['train_avg_loss', 'val_avg_loss'])
+    train_loss_history = df['train_avg_loss'].tolist()
+    val_loss_history = df['val_avg_loss'].tolist()
+
+    epochs = range(1, len(train_loss_history) + 1)
+    plt.rcParams['font.size'] = 13
+
+    plt.figure(figsize=(9, 7))
+    plt.plot(epochs, train_loss_history, 'bo-', label='Train AvgLoss')
+    plt.plot(epochs, val_loss_history, 'ro-', label='Validation AvgLoss')
+    plt.title(f'Trial {model_iter}: Train and Validation Loss vs. Epochs')
+    plt.xlabel('Epoch')
+    plt.ylabel('Cross Entropy Loss')
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+    plt.savefig(train_val_ce_loss_plot_path)
+    plt.close()
+
 
 def plot_validation_history(history, model_iter):
     roc_auc_plot_path = f'optuna_plots_{optuna_version}/trial_{model_iter}_roc_auc_validation_history.png'
@@ -291,9 +346,9 @@ def plot_validation_history(history, model_iter):
     ce_loss_history = df['cross_entropy'].tolist()
 
     epochs = range(1, len(roc_auc_history) + 1)
-    plt.rcParams['font.size'] = 18
+    plt.rcParams['font.size'] = 14
 
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(9, 7))
     plt.plot(epochs, roc_auc_history, 'ro-', label='ROC AUC')
     plt.title(f'Trial {model_iter}: ROC AUC vs. Epochs')
     plt.xlabel('Epoch')
@@ -303,7 +358,7 @@ def plot_validation_history(history, model_iter):
     plt.savefig(roc_auc_plot_path)
     plt.close()
 
-    plt.figure(figsize=(8, 6))
+    plt.figure(figsize=(9, 7))
     plt.plot(epochs, ce_loss_history, 'ro-')
     plt.title(f'Trial {model_iter}: Cross Entropy vs. Epochs')
     plt.xlabel('Epoch')
@@ -320,17 +375,17 @@ def objective(trial):
     fc_params = FullyConnected_params(trial, base_channels)
 
     # Number of epochs
-    num_epochs = 25
+    num_epochs = 50
 
     # Schedulers
     lr_scheduler_name = trial.suggest_categorical('lr_scheduler',
         ['steps', 'flat+decay', 'flat+linear', 'flat+cos', 'one-cycle'])
 
     # Optimizers
-    optimizer_name = trial.suggest_categorical('optimizer', ['radam', 'ranger'])
+    optimizer_name = trial.suggest_categorical('optimizer', ['adam', 'adamW', 'radam', 'ranger'])
 
     # Batch size
-    batch_size = trial.suggest_categorical('batch_size', [64, 128, 256])
+    batch_size = trial.suggest_categorical('batch_size', [128, 256])
 
     # Number of steps per epoch
     num_train_samples = 580352
@@ -340,13 +395,13 @@ def objective(trial):
     other_training_params = {}
     # depending on the scheduler, set the learning rate and warmup steps
     if lr_scheduler_name == 'one-cycle': # one-cycle does not use warmup
-        start_lr = trial.suggest_float('start_lr', 1e-5, 1e-3, log=True)
+        start_lr = trial.suggest_float('start_lr', 1e-8, 1e-5, log=True)
         other_training_params['--start-lr'] = start_lr
     else:
-        start_lr = trial.suggest_float('start_lr', 1e-6, 1e-4, log=True)
+        start_lr = trial.suggest_float('start_lr', 1e-8, 1e-6, log=True)
         other_training_params['--start-lr'] = start_lr
         if lr_scheduler_name in ['flat+decay', 'flat+linear', 'flat+cos', 'steps']:
-            warmup_epochs = trial.suggest_int('warmup_epochs', 0, 4, step=1)
+            warmup_epochs = trial.suggest_int('warmup_epochs', 0, 5, step=1)
             other_training_params['--warmup-steps'] = warmup_epochs
 
 
@@ -364,13 +419,18 @@ def objective(trial):
         # Define the path to the log file
         log_path = f'optuna_logs_{optuna_version}/optuna_model_{model_iter}.log'
 
-        # Call the parser to read the file and extract the history
+        # Parse roc auc and ce loss of validation set from the log file
         history_df = parse_validation_metrics(log_path, model_iter)
         best_val_roc_auc = max(history_df['roc_auc'])
         best_val_ce_loss = min(history_df['cross_entropy'])
 
-        # Call the plotter to save a visualization of the history
+        # Parse train and validation cross entropy loss  
+        tr_val_history_df = parse_train_and_validation_metrics(log_path, model_iter)
+        #best_val_ce_loss = min(tr_val_history_df['val_avg_loss'])
+
+        # Visualization of the history
         plot_validation_history(history_df, model_iter)
+        plot_tr_val_history(tr_val_history_df, model_iter)
 
         # RUN PREDICTION
         run_prediction(model_iter, batch_size)

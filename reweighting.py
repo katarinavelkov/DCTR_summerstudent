@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, auc
 
 
-optuna_version = 8  # Change this to the version of optuna run
-number_of_models = 8  # Total number of models trained in that optuna run
-sample_number = 1  # Change this to the sample number you want to plot
+optuna_version = 9  # Change this to the version of optuna run
+number_of_models = 20  # Total number of models trained in that optuna run
+sample_number = 2  # Change this to the sample number you want to plot
 
 for num in range(number_of_models):
     print('-----------------------------------------------------------')
@@ -33,8 +33,10 @@ for num in range(number_of_models):
     score_1 = score[label == 1]
 
     # reweighting of one class to the chosen target distribution!
-    epsilon = 1e-9
-    weights_0 = score_0 / (1 - score_0 + epsilon)
+    epsilon = 1e-10
+    #weights_0 = score_0 / (1 - score_0 + epsilon)
+    weights_0 = (1 - score_0) / (score_0 + epsilon)
+    weights_1 = (1 - score_1) / (score_1 + epsilon)
 
     # Plotting distribution
     plt.figure(figsize=(8, 6))
@@ -53,13 +55,14 @@ for num in range(number_of_models):
     plt.hist(score_1, bins=bins, density=True, alpha=0.6, label='Class 1', color='red')
     
     # Reweighted class 0
-    plt.hist(score_0, bins=bins, weights=weights_0, density=True, label='Reweighted Class 0', histtype='step', linestyle='--', edgecolor='black', linewidth=1.5)
-
+    #plt.hist(score_0, bins=bins, weights=weights_0, density=True, label='Reweighted Class 0, new reweighting', histtype='step', linestyle='--', edgecolor='black', linewidth=1.5)
+    plt.hist(score_1, bins=bins, weights=weights_1, density=True, label='Reweighted Class 1, new reweighting', histtype='step', linestyle='--', edgecolor='black', linewidth=1.5)
+    
     plt.xlabel(f"Classifier output for sample{sample_number}")
     plt.ylabel("Density")
     plt.title(f"Distribution of score_label_sample{sample_number}")
     plt.legend()
     plt.grid(True)
     plt.tight_layout()
-    plt.savefig(f"distribution_plots/reweighted_plot_optuna_{optuna_version}_{num}_sample{sample_number}.png")
+    plt.savefig(f"distribution_plots/reweighted_plot_optuna_{optuna_version}_{num}_sample{sample_number}_new_score1.png")
     plt.close() 

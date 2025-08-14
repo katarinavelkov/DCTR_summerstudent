@@ -1,3 +1,5 @@
+# reweighting is done to equalize the distributions across classes in input variables (often pT and η) to prevent the model from learning trivial features tied to class imbalances
+
 selection:
 
 
@@ -11,7 +13,8 @@ preprocess:
 new_variables:
    label_sample1 : isSignal
    label_sample2 : 1-isSignal
-   
+   data_variable : '0.5'
+   dummy_variable : '0' 
 
 inputs:
    points:
@@ -56,3 +59,21 @@ labels:
    # !prej je bilo tako!:
    type: simple
    value: [label_sample1, label_sample2] #tko je bilo prej - one hot encoded
+
+weights:
+   use_precomputed_weights: false # let weaver compute the histograms
+   reweight_method: ref
+   reweight_vars:
+      data_variable: [0, 1]   
+      dummy_variable: [0, 1] 
+   #reweight_vars:
+   #   data_variable:
+   #      - 0
+   #      - 1
+
+   reweight_classes:
+      - label_sample1
+      - label_sample2
+   class_weights:
+      - 1
+      - 1
