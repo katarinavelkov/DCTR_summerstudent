@@ -5,9 +5,9 @@ import matplotlib.pyplot as plt
 from sklearn.metrics import roc_curve, auc
 
 
-optuna_version = 9  # Change this to the version of optuna run
-number_of_models = 20  # Total number of models trained in that optuna run
-sample_number = 2  # Change this to the sample number you want to plot
+optuna_version = 15  # Change this to the version of optuna run
+number_of_models = 10  # Total number of models trained in that optuna run
+sample_number = 1  # Change this to the sample number you want to plot, 1 or 2
 
 for num in range(number_of_models):
     print('-----------------------------------------------------------')
