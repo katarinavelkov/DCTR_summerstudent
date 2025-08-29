@@ -77,3 +77,15 @@ weights:
    class_weights:
       - 1
       - 1
+
+observers:
+   - GenObject_pt
+   - GenObject_eta
+   - GenObject_phi
+   - GenObject_mass
+   - GenObject_charge
+   - GenObject_isJet
+   - GenObject_isLepton
+   - GenObject_isTau
+   - GenObject_isNeutrino
+   - genWeight
