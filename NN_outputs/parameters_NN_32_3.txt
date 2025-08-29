@@ -1,0 +1,2 @@
+epochs	batch_size	learning_rate
+40	256	0.0001

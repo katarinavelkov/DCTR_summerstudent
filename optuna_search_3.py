@@ -18,7 +18,7 @@ import pandas as pd
 TRAIN_PATH = r'/eos/cms/store/group/cmst3/user/sesanche/SummerStudent/train_0p01/*.root'
 TEST_PATH = r'/eos/cms/store/group/cmst3/user/sesanche/SummerStudent/test_0p01/*.root'
 
-optuna_version = input("Enter number of the Optuna version: ")
+optuna_version = 24
 
 os.makedirs(f'optuna_models_{optuna_version}', exist_ok=True)
 os.makedirs(f'optuna_logs_{optuna_version}', exist_ok=True)
@@ -27,10 +27,10 @@ os.makedirs(f'optuna_plots_{optuna_version}', exist_ok=True)
 
 
 def EdgeConv_params(trial):
-    num_ec_blocks = trial.suggest_int('num_ec_blocks', 2, 3)
+    num_ec_blocks = trial.suggest_int('num_ec_blocks', 1, 3)
     ec_k = trial.suggest_int('ec_k', 4, 20, step=2)
 
-    num_base_neurons = [128, 256]
+    num_base_neurons = [32, 64, 128, 256]
     base_channels = trial.suggest_categorical('ec_base_channels', num_base_neurons)
 
     ec_params = []
@@ -39,16 +39,17 @@ def EdgeConv_params(trial):
         current_block = (current_channels, current_channels, current_channels)
         ec_params.append((ec_k, current_block))
         # current_channels *= 2  # double the channels for the next block, creating a funnel
-        current_channels = current_channels // 2  # halve the channels for the next block
+        # current_channels = current_channels // 2  # halve the channels for the next block
 
-    #final_output_channels = current_channels // 2
+    final_output_channels = current_channels 
 
     return ec_params, final_output_channels
 
+
 def FullyConnected_params(trial, final_output_channels):
-    num_fc_layers = trial.suggest_int('num_fc_layers', 1, 2)
-    num_neurons = [128, 256]
-    fc_drop = trial.suggest_float('fc_p', 0.2, 0.5, step=0.1)
+    num_fc_layers = trial.suggest_int('num_fc_layers', 1, 3)
+    num_neurons = [64, 128, 256, 512]
+    fc_drop = trial.suggest_float('fc_p', 0.1, 0.5, step=0.1)
     fc_neurons = trial.suggest_categorical('fc_c', num_neurons)
 
     fc_params = []
@@ -91,7 +92,8 @@ def get_model(data_config, **kwargs):
                         use_fusion=use_fusion,
                         use_fts_bn=kwargs.get('use_fts_bn', False),
                         use_counts=kwargs.get('use_counts', True),
-                        for_inference=kwargs.get('for_inference', False)
+                        #for_inference=kwargs.get('for_inference', False),
+                        for_inference=True
                         )
     model_info = {{
         'input_names': list(data_config.input_names),
@@ -380,7 +382,7 @@ def objective(trial):
     fc_params = FullyConnected_params(trial, base_channels)
 
     # Number of epochs
-    num_epochs = 40
+    num_epochs = 20
 
     # Schedulers
     lr_scheduler_name = trial.suggest_categorical('lr_scheduler',
@@ -403,15 +405,15 @@ def objective(trial):
     # depending on the scheduler, set the learning rate and warmup steps
     if lr_scheduler_name == 'one-cycle': # one-cycle does not use warmup
         #start_lr = trial.suggest_float('start_lr', 1e-7, 1e-3, log=True)
-        start_lr = trial.suggest_categorical('start_lr', [5e-8, 1e-7, 5e-7, 1e-6, 5e-6, 1e-5, 5e-5, 1e-4])
+        start_lr = trial.suggest_categorical('start_lr', [ 1e-7, 5e-7, 1e-6, 5e-6, 1e-5, 5e-5, 1e-4, 5e-03])
 
         other_training_params['--start-lr'] = start_lr
     else:
         #start_lr = trial.suggest_float('start_lr', 1e-8, 1e-6, log=True)
-        start_lr = trial.suggest_categorical('start_lr', [5e-8, 1e-7, 5e-7, 1e-6, 5e-6, 1e-5, 5e-5, 1e-4])
+        start_lr = trial.suggest_categorical('start_lr', [ 1e-7, 5e-7, 1e-6, 5e-6, 1e-5, 5e-5, 1e-4, 5e-03])
         other_training_params['--start-lr'] = start_lr
         if lr_scheduler_name in ['flat+decay', 'flat+linear', 'flat+cos', 'steps']:
-            warmup_epochs = trial.suggest_int('warmup_epochs', 0, 7, step=1)
+            warmup_epochs = trial.suggest_int('warmup_epochs', 0, 6, step=1)
             other_training_params['--warmup-steps'] = warmup_epochs
 
 
@@ -487,10 +489,11 @@ def objective(trial):
 def main():
     study = optuna.create_study(
         directions=['maximize', 'minimize'], 
-        study_name='ParticleNet_Optuna_Search', 
-        sampler=optuna.samplers.RandomSampler())
+        study_name='ParticleNet_Optuna_Search',
+        sampler=optuna.samplers.TPESampler())
+        #sampler=optuna.samplers.RandomSampler())
     
-    study.optimize(objective, n_trials=10, n_jobs=1)
+    study.optimize(objective, n_trials=100, n_jobs=1)
 
 
 if __name__ == "__main__":
